@@ -14,7 +14,7 @@
 <body>
   <h1>Gerador de DANFE</h1>
   
-  <textarea id="xmlInput" rows="10" cols="50" placeholder="Cole o XML da NFe ou escaneie a chave"></textarea><br>
+  <textarea id="xmlInput" rows="10" cols="50" placeholder="Cole o XML da NFe ou escaneie a chave"></textarea>< ascending: true;
   <input type="file" id="xmlFile" accept=".xml" onchange="carregarArquivo()"><br>
   <button onclick="iniciarScanner()">Escanear Código</button>
   <button onclick="gerarDanfe()">Gerar DANFE</button>
@@ -46,6 +46,7 @@
 
     function iniciarScanner() {
       const scannerContainer = document.getElementById('scanner-container');
+      const video = document.getElementById('scanner');
       scannerContainer.style.display = 'block';
       scannerAtivo = true;
 
@@ -53,7 +54,7 @@
         inputStream: {
           name: "Live",
           type: "LiveStream",
-          target: document.querySelector('#scanner'),
+          target: video,
           constraints: { facingMode: "environment" }
         },
         decoder: {
@@ -62,15 +63,20 @@
       }, function(err) {
         if (err) {
           document.getElementById('resultado').innerHTML = `<p style="color:red;">Erro ao iniciar scanner: ${err}</p>`;
+          console.error("Erro no Quagga.init:", err);
           return;
         }
         Quagga.start();
+        video.srcObject = Quagga.camera.stream;
+        video.play().catch(e => console.error("Erro ao reproduzir vídeo:", e));
+        console.log("Scanner iniciado com sucesso");
       });
 
       Quagga.onDetected(async function(result) {
         const chave = result.codeResult.code;
         if (chave) {
           document.getElementById('xmlInput').value = chave;
+          console.log("Chave detectada:", chave);
           pararScanner();
           await buscarXmlPorChave(chave);
         }
@@ -88,21 +94,27 @@
     async function buscarXmlPorChave(chave) {
       const resultadoDiv = document.getElementById('resultado');
       try {
-        const response = await fetch('https://ws.meudanfe.com/api/v1/get/nfe/chave', { // Ajuste este endpoint!
+        const response = await fetch('https://ws.meudanfe.com/api/v1/get/nfe/chave/xml', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            // Descomente e adicione seu token, se necessário
+            // 'Authorization': 'Bearer SEU_TOKEN_AQUI'
+          },
           body: JSON.stringify({ chave: chave })
         });
-
         if (response.status === 200) {
           const xml = await response.text();
           document.getElementById('xmlInput').value = xml;
+          console.log("XML obtido:", xml);
           await gerarDanfe();
         } else {
           resultadoDiv.innerHTML = `<p style="color:red;">Erro ao buscar XML: Status ${response.status}</p>`;
+          console.error("Erro na resposta:", response.status, await response.text());
         }
       } catch (error) {
         resultadoDiv.innerHTML = `<p style="color:red;">Erro ao buscar XML: ${error.message}</p>`;
+        console.error("Erro no fetch:", error);
       }
     }
 
@@ -129,11 +141,8 @@
           pdfUrl = `data:application/pdf;base64,${pdfData}`;
           resultadoDiv.innerHTML = `<iframe src="${pdfUrl}" width="100%" height="500px"></iframe>`;
           downloadBtn.style.display = 'inline';
-        } else if (response.status === 500) {
-          resultadoDiv.innerHTML = '<p style="color:red;">Falha ao gerar PDF do DANFE! Confira o seu XML.</p>';
-          downloadBtn.style.display = 'none';
         } else {
-          resultadoDiv.innerHTML = `<p style="color:red;">Erro: Status ${response.status}</p>`;
+          resultadoDiv.innerHTML = `<p style="color:red;">Erro ao gerar DANFE: Status ${response.status}</p>`;
           downloadBtn.style.display = 'none';
         }
       } catch (error) {
