@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meu DANFE</title>
+  <style>
+    #scanner-container { display: none; margin-top: 10px; }
+    video { max-width: 100%; }
+    #resultado, textarea, input, button { margin: 10px 0; }
+    textarea { width: 100%; max-width: 500px; }
+  </style>
+</head>
+<body>
+  <h1>Gerador de DANFE</h1>
+  
+  <textarea id="xmlInput" rows="10" cols="50" placeholder="Cole o XML da NFe ou escaneie a chave"></textarea><br>
+  <input type="file" id="xmlFile" accept=".xml" onchange="carregarArquivo()"><br>
+  <button onclick="iniciarScanner()">Escanear Código</button>
+  <button onclick="gerarDanfe()">Gerar DANFE</button>
+  <button id="downloadBtn" onclick="baixarDanfe()" style="display:none;">Baixar PDF</button>
+  
+  <div id="scanner-container">
+    <video id="scanner"></video>
+    <button onclick="pararScanner()">Parar Scanner</button>
+  </div>
+  
+  <div id="resultado"></div>
+
+  <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
+  <script>
+    let pdfUrl = '';
+    let scannerAtivo = false;
+
+    function carregarArquivo() {
+      const fileInput = document.getElementById('xmlFile');
+      const file = fileInput.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          document.getElementById('xmlInput').value = e.target.result;
+        };
+        reader.readAsText(file);
+      }
+    }
+
+    function iniciarScanner() {
+      const scannerContainer = document.getElementById('scanner-container');
+      scannerContainer.style.display = 'block';
+      scannerAtivo = true;
+
+      Quagga.init({
+        inputStream: {
+          name: "Live",
+          type: "LiveStream",
+          target: document.querySelector('#scanner'),
+          constraints: { facingMode: "environment" }
+        },
+        decoder: {
+          readers: ["code_128_reader"]
+        }
+      }, function(err) {
+        if (err) {
+          document.getElementById('resultado').innerHTML = `<p style="color:red;">Erro ao iniciar scanner: ${err}</p>`;
+          return;
+        }
+        Quagga.start();
+      });
+
+      Quagga.onDetected(async function(result) {
+        const chave = result.codeResult.code;
+        if (chave) {
+          document.getElementById('xmlInput').value = chave;
+          pararScanner();
+          await buscarXmlPorChave(chave);
+        }
+      });
+    }
+
+    function pararScanner() {
+      if (scannerAtivo) {
+        Quagga.stop();
+        scannerAtivo = false;
+        document.getElementById('scanner-container').style.display = 'none';
+      }
+    }
+
+    async function buscarXmlPorChave(chave) {
+      const resultadoDiv = document.getElementById('resultado');
+      try {
+        const response = await fetch('https://ws.meudanfe.com/api/v1/get/nfe/chave', { // Ajuste este endpoint!
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chave: chave })
+        });
+
+        if (response.status === 200) {
+          const xml = await response.text();
+          document.getElementById('xmlInput').value = xml;
+          await gerarDanfe();
+        } else {
+          resultadoDiv.innerHTML = `<p style="color:red;">Erro ao buscar XML: Status ${response.status}</p>`;
+        }
+      } catch (error) {
+        resultadoDiv.innerHTML = `<p style="color:red;">Erro ao buscar XML: ${error.message}</p>`;
+      }
+    }
+
+    async function gerarDanfe() {
+      const xml = document.getElementById('xmlInput').value;
+      const resultadoDiv = document.getElementById('resultado');
+      const downloadBtn = document.getElementById('downloadBtn');
+
+      if (!xml) {
+        resultadoDiv.innerHTML = '<p style="color:red;">Por favor, insira ou carregue um XML válido!</p>';
+        return;
+      }
+
+      try {
+        const response = await fetch('https://ws.meudanfe.com/api/v1/get/nfe/xmltodanfepdf/API', {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: xml
+        });
+
+        if (response.status === 200) {
+          const base64 = await response.text();
+          const pdfData = base64.replace(/"/g, '');
+          pdfUrl = `data:application/pdf;base64,${pdfData}`;
+          resultadoDiv.innerHTML = `<iframe src="${pdfUrl}" width="100%" height="500px"></iframe>`;
+          downloadBtn.style.display = 'inline';
+        } else if (response.status === 500) {
+          resultadoDiv.innerHTML = '<p style="color:red;">Falha ao gerar PDF do DANFE! Confira o seu XML.</p>';
+          downloadBtn.style.display = 'none';
+        } else {
+          resultadoDiv.innerHTML = `<p style="color:red;">Erro: Status ${response.status}</p>`;
+          downloadBtn.style.display = 'none';
+        }
+      } catch (error) {
+        resultadoDiv.innerHTML = `<p style="color:red;">Erro ao conectar com a API: ${error.message}</p>`;
+        downloadBtn.style.display = 'none';
+      }
+    }
+
+    function baixarDanfe() {
+      if (pdfUrl) {
+        const link = document.createElement('a');
+        link.href = pdfUrl;
+        link.download = 'danfe.pdf';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        alert('Gere o DANFE primeiro!');
+      }
+    }
+  </script>
+</body>
+</html>
